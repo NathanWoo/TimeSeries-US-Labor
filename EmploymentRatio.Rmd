@@ -1,0 +1,226 @@
+---
+title: "Employment-Ration"
+author: "Nathan Wu"
+date: "5/26/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r cars}
+raw_csv <- read.csv("LNU02300000.csv")
+head(raw_csv)
+```
+
+
+```{r split data}
+date <- raw_csv$DATE
+emp_rate <- raw_csv$LNU02300000
+emp_rate <- ts(emp_rate, start = c(1948,1), frequency = 12)
+ts.plot(emp_rate)
+ts.plot(emp_rate[400:611], main = "Employment-Population Ratio", ylab = "Employment-Population Ratio")
+length(emp_rate)
+emp <- emp_rate[400:611]
+emp_train <- emp_rate[400:599]
+emp_test <- emp_rate[600:611]
+```
+```{r}
+head(date[400:599])
+tail(date[600:611])
+```
+
+
+
+```{r training data analysis}
+op = par(no.readonly = TRUE)
+par(mfrow = c(1,2))
+#plot.ts(emp_train, main = "Training data")
+#fitt <- lm(emp_train ~ as.numeric(1:length(emp_train))); 
+#abline(fitt, col="red")
+#abline(h=mean(emp_train), col="blue")
+acf(emp_train, main = "ACF")
+title("Title text", adj = 0.5, line = 0)
+hist(emp_train, main = "Histogram of training data")
+par(op)
+```
+
+```{r eval=FALSE, dpi=100, mychunk, cache=TRUE}
+library(MASS)
+bcTransform <- boxcox(emp_train ~ as.numeric(1:length(emp_train)), lambda = seq(-10, 10, 1/10) ) 
+lambda=bcTransform$x[which(bcTransform$y == max(bcTransform$y))]
+emp_bc <- (1/lambda)*(emp_train^lambda-1)
+lambda
+```
+```{r}
+plot.ts(emp_train, main = "Before transformation", ylab = "X")
+plot.ts(emp_bc, main = "After transformation", ylab = expression(("X"^9.2-1)%/%9.2))
+hist(emp_train, main = "Histogram of pre-transformation data", xlab = "X")
+hist(emp_bc, main = "Histogram of post-transformation data", xlab = expression(("X"^9.2-1)%/%9.2))
+```
+After the Box-box transformation we go ahead and carry the differencing to remove the trend. Where we difference at lag 1 to eliminate the trend 
+Can still a very obvious seasonality. 
+```{r}
+library(forecast)
+emp_stat <- diff(emp_bc, lag = 1)
+emp_12 <- diff(emp_stat, lag = 12)
+var(emp_bc)
+var(emp_stat)
+var(emp_12)
+hist(emp_12,  main = "Histogram of Y differenced at lag 12 and 1")
+plot.ts(emp_12, main = "Y differenced at lag 12 and 1")
+fitt <- lm(emp_12 ~ as.numeric(1:length(emp_12))); 
+abline(fitt, col="red")
+abline(h=mean(emp_12), col="blue")
+acf(emp_12, 100, main = "ACF of Differenced Data")
+pacf(emp_12, 100,  main = "PACF of Differenced Data")
+```
+
+ARMA(p,q) p = 1 q = 1 or 0 P = 3 or 2  Q = 1
+
+
+SARIMA(1,1,1)_(3,1,1)_12
+SARIMA(1,1,0)_(3,1,1)_12
+```{r}
+arima_111_311 <- arima(emp_bc, order=c(1,1,1), seasonal = list(order = c(3,1,1), period = 12), method="ML")
+arima_110_311 <- arima(emp_bc, order=c(1,1,0), seasonal = list(order = c(3,1,1), period = 12), method="ML")
+```
+
+SARIMA(1,1,1)_(2,1,1)_12
+SARIMA(1,1,0)_(2,1,1)_12
+```{r}
+arima_111_211 <- arima(emp_bc, order=c(1,1,1), seasonal = list(order = c(2,1,1), period = 12), method="ML")
+arima_110_211 <- arima(emp_bc, order=c(1,1,0), seasonal = list(order = c(2,1,1), period = 12), method="ML")
+```
+
+test their AICc
+```{r}
+library(qpcR)
+AICc(arima_110_311)
+AICc(arima_111_211)
+AICc(arima_110_211)
+```
+
+
+
+```{r}
+arima_111_211
+arima_110_211
+```
+
+arima_110_111
+```{r}
+arima_110_111 <- arima(emp_bc, order=c(1,1,0), seasonal = list(order = c(1,1,1), period = 12), method="ML")
+```
+
+```{r}
+AICc(arima_110_211)
+AICc(arima_110_111)
+arima_110_111
+```
+
+Below we see after reuding P the acii increases, therefor we keep the P at 2. We then go ahead and reduce p
+```{r}
+arima_010_111 <- arima(emp_bc, order=c(0,1,0), seasonal = list(order = c(1,1,1), period = 12), method="ML")
+AICc(arima_110_111)
+AICc(arima_010_111)
+arima_010_111
+```
+
+```{r}
+final_res0 <- residuals(arima_010_111)
+final_res1 <- residuals(arima_110_111)
+```
+
+
+```{r}
+plot.ts(final_res0, main = "Model A Residuals")
+abline(fitt, col="red")
+abline(h=mean(final_res0), col="blue")
+fitt <- lm(final_res0 ~ as.numeric(1:length(final_res0))); 
+hist(final_res0,density=20,breaks=20, col="blue", xlab="", prob=TRUE, main = "Histogram of Model A Residuals")
+m0 <- mean(final_res0)
+std0 <- sqrt(var(final_res0))
+curve( dnorm(x,m0,std0), add=TRUE )
+qqnorm(final_res0,main= "Normal Q-Q Plot for Model A Residuals")
+qqline(final_res0,col="blue")
+```
+
+```{r}
+plot.ts(final_res1, main = "Model B Residuals")
+fitt <- lm(final_res1 ~ as.numeric(1:length(final_res0))); 
+abline(fitt, col="red")
+abline(h=mean(final_res1), col="blue")
+hist(final_res1,density=20,breaks=20, col="blue", xlab="", prob=TRUE, main = "Histogram of Model B Residuals")
+m1 <- mean(final_res1)
+std1 <- sqrt(var(final_res1))
+curve( dnorm(x,m1,std1), add=TRUE )
+qqnorm(final_res1,main= "Normal Q-Q Plot for Model B Residuals")
+qqline(final_res1,col="blue")
+```
+
+```{r}
+m1
+```
+```{r}
+acf(final_res0, main = "ACF of Model A Residuals")
+pacf(final_res0, main = "PACF of Model A Residuals")
+
+acf(final_res1, main = "ACF of Model B Residuals")
+pacf(final_res1, main = "PACF of Model B Residuals")
+```
+
+
+```{r}
+shapiro.test(final_res0)
+Box.test(final_res0, lag = 12, type = c("Box-Pierce"), fitdf = 2)
+Box.test(final_res0, lag = 12, type = c("Ljung-Box"), fitdf = 2)
+Box.test(final_res0^2, lag = 12, type = c("Ljung-Box"), fitdf = 0)
+acf(final_res0^2, lag.max=40)
+ar(final_res0, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+
+```{r}
+shapiro.test(final_res1)
+Box.test(final_res1, lag = 12, type = c("Box-Pierce"), fitdf = 2)
+Box.test(final_res1, lag = 12, type = c("Ljung-Box"), fitdf = 2)
+Box.test(final_res1^2, lag = 12, type = c("Ljung-Box"), fitdf = 0)
+acf(final_res1^2, lag.max=40)
+ar(final_res1, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+
+```{r}
+arima_110_111
+```
+
+
+```{r}
+library(forecast)
+forecast(arima_110_111) 
+pred.tr <- predict(arima_110_111, n.ahead = 12)
+U.tr= pred.tr$pred + 2*pred.tr$se
+L.tr= pred.tr$pred - 2*pred.tr$se
+ts.plot(emp_bc, xlim=c(1,length(emp_bc)+12), ylim = c(min(emp_bc),max(U.tr)))
+lines(U.tr, col="blue", lty="dashed")
+lines(L.tr, col="blue", lty="dashed")
+points((length(emp_bc)+1):(length(emp_bc)+12), pred.tr$pred, col="red")
+```
+
+```{r}
+pred.orig <- (1 + lambda*pred.tr$pred)^(1/lambda)
+U= (1 + lambda*U.tr)^(1/lambda)
+L= (1 + lambda*L.tr)^(1/lambda)
+ts.plot(emp_train, xlim=c(1,length(emp_train)+12), ylim = c(min(emp_train),max(U)))
+lines(U, col="blue", lty="dashed")
+lines(L, col="blue", lty="dashed")
+points((length(emp_train)+1):(length(emp_train)+12), pred.orig, col="red")
+```
+
+```{r}
+ts.plot(emp, xlim = c(100,length(emp_train)+12), ylim = c(56,max(U)), col="red", main = "Forecasting ", ylab = "Employment-Population Ratio")
+lines(U, col="blue", lty="dashed")
+lines(L, col="blue", lty="dashed")
+points((length(emp_train)+1):(length(emp_train)+12), pred.orig, col="green")
+points((length(emp_train)+1):(length(emp_train)+12), pred.orig, col="black")
+```
